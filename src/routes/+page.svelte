@@ -1,70 +1,91 @@
 <script lang="ts">
-	import ChatMessage from '$lib/components/ChatMessage.svelte'
-	import type { ChatCompletionRequestMessage } from 'openai'
-	import { SSE } from 'sse.js'
+    import { onMount } from 'svelte';
+    import ChatMessage from '$lib/components/ChatMessage.svelte';
 
-	let query: string = ''
-	let answer: string = ''
-	let loading: boolean = false
-	let chatMessages: ChatCompletionRequestMessage[] = []
-	let scrollToDiv: HTMLDivElement
+    // Define your own type or interface for chat messages if needed
+    interface ChatMessage {
+        role: 'user' | 'assistant';
+        content: string;
+    }
 
-	function scrollToBottom() {
-		setTimeout(function () {
-			scrollToDiv.scrollIntoView({ behavior: 'smooth', block: 'end', inline: 'nearest' })
-		}, 100)
-	}
+    let query: string = '';
+    let answer: string = '';
+    let loading: boolean = false;
+    let chatMessages: ChatMessage[] = [];
+    let scrollToDiv: HTMLDivElement;
+    let threadId: string | null = null;
 
-	const handleSubmit = async () => {
-		loading = true
-		chatMessages = [...chatMessages, { role: 'user', content: query }]
+    // Initialize conversation thread when component is mounted
+    onMount(async () => {
+        await initializeThread();
+    });
 
-		const eventSource = new SSE('/api/chat', {
-			headers: {
-				'Content-Type': 'application/json'
-			},
-			payload: JSON.stringify({ messages: chatMessages })
-		})
+    async function initializeThread() {
+        try {
+            const response = await fetch('https://openaichat-dl8n.onrender.com/start');
+            const data = await response.json();
+            if (response.ok) {
+                threadId = data.thread_id;
+            } else {
+                throw new Error(data.error || 'Failed to initialize conversation thread.');
+            }
+        } catch (err) {
+            handleError(err);
+        }
+    }
 
-		query = ''
+    function scrollToBottom() {
+        setTimeout(function () {
+            scrollToDiv.scrollIntoView({ behavior: 'smooth', block: 'end', inline: 'nearest' })
+        }, 100)
+    }
 
-		eventSource.addEventListener('error', handleError)
+    const handleSubmit = async () => {
+        loading = true
+        chatMessages = [...chatMessages, { role: 'user', content: query }]
 
-		eventSource.addEventListener('message', (e) => {
-			scrollToBottom()
-			try {
-				loading = false
-				if (e.data === '[DONE]') {
-					chatMessages = [...chatMessages, { role: 'assistant', content: answer }]
-					answer = ''
-					return
-				}
+        try {
+            const response = await fetch('https://openaichat-dl8n.onrender.com/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    thread_id: threadId,
+                    message: query
+                })
+            });
 
-				const completionResponse = JSON.parse(e.data)
-				const [{ delta }] = completionResponse.choices
+            const data = await response.json();
 
-				if (delta.content) {
-					answer = (answer ?? '') + delta.content
-				}
-			} catch (err) {
-				handleError(err)
-			}
-		})
-		eventSource.stream()
-		scrollToBottom()
-	}
+            if (response.ok) {
+                if (!threadId) {
+                    threadId = data.thread_id; // Save the thread ID for subsequent requests
+                }
+                chatMessages = [...chatMessages, { role: 'assistant', content: data.response }];
+            } else {
+                handleError(data.error);
+            }
+        } catch (err) {
+            handleError(err);
+        } finally {
+            loading = false;
+            query = '';
+            scrollToBottom();
+        }
+    }
 
-	function handleError<T>(err: T) {
-		loading = false
-		query = ''
-		answer = ''
-		console.error(err)
-	}
+    function handleError<T>(err: T) {
+        loading = false;
+        query = '';
+        answer = '';
+        console.error(err);
+    }
 </script>
 
 <div class="flex flex-col pt-4 w-full px-8 items-center gap-2">
 	<div>
-		<h1 class="text-2xl font-bold w-full text-center">Chatty</h1>
+		<h1 class="text-2xl font-bold w-full text-center">Steinbock Solar Expert</h1>
 		<p class="text-sm italic">Powered by gpt-3.5-turbo</p>
 	</div>
 	<div class="h-[500px] w-full bg-gray-900 rounded-md p-4 overflow-y-auto flex flex-col gap-4">
